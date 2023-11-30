@@ -29,8 +29,14 @@ public class Function
         var userId = request.QueryStringParameters["userId"];
 
 		request.QueryStringParameters.TryGetValue("pageSize", out var pageSizeString);
-		int.TryParse(pageSizeString, out var pageSize);
-        pageSize = pageSize == 0 ? 10 : pageSize;
+		_ = int.TryParse(pageSizeString, out var pageSize);
+		pageSize = pageSize == 0 ? 10 : pageSize;
+
+		request.QueryStringParameters.TryGetValue("pageNumber", out var pageNumberString);
+		_ = int.TryParse(pageNumberString, out var pageNumber);
+		pageNumber = pageNumber <= 0 ? 1 : pageNumber;
+
+		var startIndex = (pageNumber - 1) * pageSize;
 
 		if (pageSize > 1000 || pageSize < 1)
 		{
@@ -47,9 +53,8 @@ public class Function
 			};
 		}
 
-		List<Chat> chats = await GetAllChats(userId, pageSize, request);
-
-		var result = new List<GetAllChatsResponseItem>(chats.Count);
+		List<Chat> chats = await GetAllChats(userId);
+		var result = chats.Skip(startIndex).Take(pageSize).ToList();
 
 		return new APIGatewayProxyResponse
         {
@@ -64,40 +69,31 @@ public class Function
         };
     }
 
-    private async Task<List<Chat>> GetAllChats(string userId, int pageSize, APIGatewayProxyRequest request)
+    private async Task<List<Chat>> GetAllChats(string userId)
     {
-		request.QueryStringParameters.TryGetValue("lastid", out var lastId);
-
 		var user1 = new QueryOperationConfig()
-        {
-            IndexName = "user1-updatedDt-index",
-            KeyExpression = new Expression()
-            {
-                ExpressionStatement = "user1 = :user",
-                ExpressionAttributeValues = new Dictionary<string, DynamoDBEntry>() { { ":user", userId } }
-            },
-			Limit = pageSize,
-			BackwardSearch = true
-		};
-		if (lastId != null)
 		{
-			user1.PaginationToken = lastId;
-		}
+			IndexName = "user1-updatedDt-index",
+			KeyExpression = new Expression()
+			{
+				ExpressionStatement = "user1 = :user",
+				ExpressionAttributeValues = new Dictionary<string, DynamoDBEntry>() { { ":user", userId } }
+			}
+		};
 		var user1Results = await _context.FromQueryAsync<Chat>(user1).GetRemainingAsync();
 
-
 		var user2 = new QueryOperationConfig()
-        {
-            IndexName = "user2-updatedDt-index",
-            KeyExpression = new Expression()
-            {
-                ExpressionStatement = "user2 = :user",
-                ExpressionAttributeValues = new Dictionary<string, DynamoDBEntry>() { { ":user", userId } }
-            }
-        };
-        var user2Results = await _context.FromQueryAsync<Chat>(user2).GetRemainingAsync();
+		{
+			IndexName = "user2-updatedDt-index",
+			KeyExpression = new Expression()
+			{
+				ExpressionStatement = "user2 = :user",
+				ExpressionAttributeValues = new Dictionary<string, DynamoDBEntry>() { { ":user", userId } }
+			}
+		};
+		var user2Results = await _context.FromQueryAsync<Chat>(user2).GetRemainingAsync();
 
-        user1Results.AddRange(user2Results);
-        return user1Results.OrderBy(x => x.UpdateDt).ToList();
-    }
+		user1Results.AddRange(user2Results);
+		return user1Results.OrderBy(x => x.UpdateDt).ToList();
+	}
 }
